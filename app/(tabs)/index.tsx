@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, Alert, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, Alert, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as DocumentPicker from 'expo-document-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
 import { GradientBackground } from '../../components/GradientBackground';
@@ -11,37 +13,72 @@ import { Certificate } from '../../types/certificate';
 export default function HomeScreen() {
   const [certificates, setCertificates] = useState<Certificate[]>(mockCertificates);
   const [showForm, setShowForm] = useState(false);
+  const [formRecipient, setFormRecipient] = useState('');
   const [formTitle, setFormTitle] = useState('');
   const [formIssuer, setFormIssuer] = useState('');
   const [formDescription, setFormDescription] = useState('');
+  const [formIssueDate, setFormIssueDate] = useState(new Date().toISOString().split('T')[0]);
+  const [formExpiry, setFormExpiry] = useState('');
+  const [formFileUri, setFormFileUri] = useState('');
+  const [formFileName, setFormFileName] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [formErrors, setFormErrors] = useState<Record<string,string>>({});
   const today = new Date().toISOString().split('T')[0];
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const certCount = certificates.length;
 
   const handleAddCertificate = () => setShowForm(true);
 
-  const handleSubmit = () => {
-    if (!formTitle.trim() || !formIssuer.trim()) {
-      Alert.alert('Missing Data', 'Title and Issuer are required.');
-      return;
+  const validateForm = async () => {
+    const errs: Record<string,string> = {};
+    if (!formRecipient.trim()) errs.recipient = 'Recipient required';
+    if (!formTitle.trim()) errs.title = 'Title required';
+    if (!formIssuer.trim()) errs.issuer = 'Issuer required';
+    if (formDescription.length > 200) errs.description = 'Max 200 chars';
+    const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!isoDateRegex.test(formIssueDate)) errs.dateIssued = 'Invalid date (YYYY-MM-DD)';
+    if (formExpiry) {
+      if (!isoDateRegex.test(formExpiry)) errs.expiry = 'Invalid expiry date';
+      else if (formIssueDate && formExpiry < formIssueDate) errs.expiry = 'Expiry before issue date';
     }
+    setFormErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    const ok = await validateForm();
+    if (!ok) { setSubmitting(false); return; }
     const newCert: Certificate = {
       id: Date.now().toString(),
       title: formTitle.trim(),
       issuer: formIssuer.trim(),
-      dateIssued: today,
+      dateIssued: formIssueDate,
       isVerified: true,
       description: formDescription.trim() || undefined,
+      recipient: formRecipient.trim(),
+      expiry: formExpiry.trim() || undefined,
+      fileUri: formFileUri.trim() || undefined,
     };
     setCertificates(prev => [newCert, ...prev]);
+    // reset form
+    setFormRecipient('');
     setFormTitle('');
     setFormIssuer('');
     setFormDescription('');
+    setFormIssueDate(today);
+    setFormExpiry('');
+  setFormFileUri('');
+  setFormFileName('');
+    setFormErrors({});
     setShowForm(false);
+    setSubmitting(false);
     Alert.alert('Certificate Added', 'Certificate added locally.');
   };
 
   const handleCancel = () => {
+    if (submitting) return;
     setShowForm(false);
   };
 
@@ -96,43 +133,103 @@ export default function HomeScreen() {
           <FloatingActionButton onPress={handleAddCertificate} />
           {showForm && (
             <View style={{ position:'absolute', left:0, right:0, top:0, bottom:0, backgroundColor:'rgba(0,0,0,0.65)', justifyContent:'center', paddingHorizontal:24 }}>
-              <View style={{ backgroundColor:'#101826', borderRadius:16, padding:20 }}>
-                <Text style={{ color:'white', fontSize:18, fontWeight:'700', marginBottom:12 }}>New Certificate</Text>
-                <Text style={labelStyle}>Title *</Text>
-                <TextInput
-                  value={formTitle}
-                  onChangeText={setFormTitle}
-                  placeholder="e.g. AI Fundamentals"
-                  placeholderTextColor="#556"
-                  style={inputStyle}
-                />
-                <Text style={labelStyle}>Issuer *</Text>
-                <TextInput
-                  value={formIssuer}
-                  onChangeText={setFormIssuer}
-                  placeholder="e.g. Demo University"
-                  placeholderTextColor="#556"
-                  style={inputStyle}
-                />
-                <Text style={labelStyle}>Description</Text>
-                <TextInput
-                  value={formDescription}
-                  onChangeText={setFormDescription}
-                  placeholder="Short description"
-                  placeholderTextColor="#556"
-                  style={[inputStyle, { height:80, textAlignVertical:'top', paddingTop:10 }]}
-                  multiline
-                  maxLength={200}
-                />
-                <Text style={{ color:'#667', fontSize:12, textAlign:'right' }}>{formDescription.length}/200</Text>
-                <View style={{ flexDirection:'row', marginTop:16, gap:12 }}>
-                  <TouchableOpacity onPress={handleCancel} style={[buttonBase,{ backgroundColor:'#223' }]}>
-                    <Text style={buttonText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleSubmit} style={[buttonBase,{ backgroundColor:'#00f5d4' }]}>
-                    <Text style={[buttonText,{ color:'#042', }]}>Add</Text>
-                  </TouchableOpacity>
-                </View>
+              <View style={{ backgroundColor:'#101826', borderRadius:16, padding:20, maxHeight:'90%' }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 12 }}>
+                  <Text style={{ color:'white', fontSize:18, fontWeight:'700', marginBottom:12 }}>New Certificate</Text>
+                  <FormField label="Recipient Wallet *" error={formErrors.recipient}>
+                    <TextInput
+                      value={formRecipient}
+                      onChangeText={setFormRecipient}
+                      placeholder="Base58 address"
+                      placeholderTextColor="#556"
+                      style={inputStyle}
+                      autoCapitalize="none"
+                    />
+                  </FormField>
+                  <FormField label="Title *" error={formErrors.title}>
+                    <TextInput
+                      value={formTitle}
+                      onChangeText={setFormTitle}
+                      placeholder="e.g. AI Fundamentals"
+                      placeholderTextColor="#556"
+                      style={inputStyle}
+                    />
+                  </FormField>
+                  <FormField label="Issuer *" error={formErrors.issuer}>
+                    <TextInput
+                      value={formIssuer}
+                      onChangeText={setFormIssuer}
+                      placeholder="Organization"
+                      placeholderTextColor="#556"
+                      style={inputStyle}
+                    />
+                  </FormField>
+                  <FormField label="Description" error={formErrors.description}>
+                    <TextInput
+                      value={formDescription}
+                      onChangeText={setFormDescription}
+                      placeholder="Short description (max 200 chars)"
+                      placeholderTextColor="#556"
+                      style={[inputStyle, { height:90, textAlignVertical:'top', paddingTop:10 }]}
+                      multiline
+                      maxLength={200}
+                    />
+                    <Text style={{ color:'#667', fontSize:12, textAlign:'right' }}>{formDescription.length}/200</Text>
+                  </FormField>
+                  <FormField label="Issue Date *" error={formErrors.dateIssued}>
+                    <TextInput
+                      value={formIssueDate}
+                      onChangeText={setFormIssueDate}
+                      placeholder="YYYY-MM-DD"
+                      placeholderTextColor="#556"
+                      style={inputStyle}
+                    />
+                  </FormField>
+                  <FormField label="Expiry Date" error={formErrors.expiry}>
+                    <TextInput
+                      value={formExpiry}
+                      onChangeText={setFormExpiry}
+                      placeholder="YYYY-MM-DD (optional)"
+                      placeholderTextColor="#556"
+                      style={inputStyle}
+                    />
+                  </FormField>
+                  <FormField label="Certificate File (PDF/Image)">
+                    <View style={{ flexDirection:'row', alignItems:'center', gap:10 }}>
+                      <TouchableOpacity
+                        onPress={async () => {
+                          try {
+                            const res = await DocumentPicker.getDocumentAsync({ type: ['application/pdf','image/*'], copyToCacheDirectory: true });
+                            if (res.canceled) return;
+                            const file = res.assets?.[0];
+                            if (file) {
+                              setFormFileUri(file.uri);
+                              setFormFileName(file.name || 'selected-file');
+                            }
+                          } catch (e) {
+                            Alert.alert('File Error','Could not pick file');
+                          }
+                        }}
+                        style={{ backgroundColor:'#182033', paddingVertical:12, paddingHorizontal:16, borderRadius:10 }}
+                      >
+                        <Text style={{ color:'#00f5d4', fontWeight:'600' }}>{formFileUri ? 'Change File' : 'Select File'}</Text>
+                      </TouchableOpacity>
+                      {formFileUri ? (
+                        <View style={{ flex:1 }}>
+                          <Text style={{ color:'white', fontSize:12 }} numberOfLines={1}>{formFileName}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </FormField>
+                  <View style={{ flexDirection:'row', marginTop:10, gap:12 }}>
+                    <TouchableOpacity disabled={submitting} onPress={handleCancel} style={[buttonBase,{ backgroundColor:'#223', opacity: submitting ? 0.5 : 1 }]}>
+                      <Text style={buttonText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity disabled={submitting} onPress={handleSubmit} style={[buttonBase,{ backgroundColor:'#00f5d4', opacity: submitting ? 0.7 : 1 }]}>
+                      {submitting ? <ActivityIndicator color="#04141a" /> : <Text style={[buttonText,{ color:'#042' }]}>Add</Text>}
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
               </View>
             </View>
           )}
@@ -147,7 +244,17 @@ export default function HomeScreen() {
                   {selectedCert.description && <DetailField label="Description" value={selectedCert.description} multiline />}
                   {selectedCert.recipient && <DetailField label="Recipient" value={selectedCert.recipient} />}
                   {selectedCert.expiry && <DetailField label="Expiry" value={selectedCert.expiry} />}
-                  {selectedCert.fileUri && <DetailField label="File URI" value={selectedCert.fileUri} truncate />}
+                  {selectedCert.fileUri && (
+                    <View style={{ marginBottom:12 }}>
+                      <Text style={{ color:'#8aa', fontSize:12, fontWeight:'600', marginBottom:4 }}>FILE LINK</Text>
+                      <TouchableOpacity
+                        onPress={() => WebBrowser.openBrowserAsync(selectedCert.fileUri!)}
+                        style={{ backgroundColor:'#182033', borderRadius:8, padding:10 }}
+                      >
+                        <Text style={{ color:'#4dd9ff', fontSize:14 }} numberOfLines={1}>{selectedCert.fileUri}</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                   <View style={{ flexDirection:'row', marginTop:12, gap:12 }}>
                     <TouchableOpacity onPress={() => setSelectedCert(null)} style={[buttonBase,{ backgroundColor:'#223' }]}>
                       <Text style={buttonText}>Close</Text>
@@ -187,5 +294,13 @@ const DetailField = ({ label, value, multiline, truncate }: { label: string; val
         {value}
       </Text>
     </View>
+  </View>
+);
+
+const FormField = ({ label, error, children }: { label: string; error?: string; children: React.ReactNode }) => (
+  <View style={{ marginBottom:16 }}>
+    <Text style={{ color:'white', fontSize:13, fontWeight:'600', marginBottom:6 }}>{label}</Text>
+    {children}
+    {!!error && <Text style={{ color:'#ff5f56', fontSize:11, marginTop:4 }}>{error}</Text>}
   </View>
 );
