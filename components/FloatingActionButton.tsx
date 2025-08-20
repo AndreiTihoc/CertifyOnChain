@@ -21,9 +21,9 @@ export function FloatingActionButton({ onPress }: FloatingActionButtonProps) {
       from={{ scale: 0, rotate: '0deg' }}
       animate={{ scale: 1, rotate: '360deg' }}
       transition={{ type: 'spring', delay: 800 }}
-      style={{ position: 'absolute', bottom, right: 24 }}
+      style={{ position: 'absolute', bottom, right: 24, zIndex: 100 }}
     >
-      <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
+      <TouchableOpacity onPress={onPress} activeOpacity={0.8} accessibilityLabel="Add Certificate">
         <LinearGradient
           colors={['#00f5d4', '#ff3cac']}
           className="w-14 h-14 rounded-full items-center justify-center shadow-lg"
