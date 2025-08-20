@@ -1,5 +1,6 @@
 import React from 'react';
 import { TouchableOpacity, Text } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 
@@ -8,12 +9,19 @@ interface FloatingActionButtonProps {
 }
 
 export function FloatingActionButton({ onPress }: FloatingActionButtonProps) {
+  const insets = useSafeAreaInsets();
+  // Tab bar bottom offset = insets.bottom + 12 (current). Tab bar height ~64.
+  // We want the FAB to hover just above the tab bar: place center ~ (tab top - 8px).
+  const tabBarGap = 12; // matches layout config
+  const tabBarHeight = 64;
+  const desiredGapAboveTab = -60;
+  const bottom = (insets.bottom || 0) + tabBarGap + tabBarHeight + desiredGapAboveTab;
   return (
     <MotiView
       from={{ scale: 0, rotate: '0deg' }}
       animate={{ scale: 1, rotate: '360deg' }}
       transition={{ type: 'spring', delay: 800 }}
-      className="absolute bottom-6 right-6"
+      style={{ position: 'absolute', bottom, right: 24 }}
     >
       <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
         <LinearGradient

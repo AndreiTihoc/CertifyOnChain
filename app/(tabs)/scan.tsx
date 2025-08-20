@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Camera, CameraView } from 'expo-camera';
 import { MotiView } from 'moti';
 import { ScanLine, RotateCcw } from 'lucide-react-native';
@@ -10,6 +10,7 @@ import { mockScanResults } from '../../data/mockData';
 import { WalletData } from '../../types/certificate';
 
 export default function ScanScreen() {
+  const insets = useSafeAreaInsets();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
   const [scannedData, setScannedData] = useState<WalletData | null>(null);
@@ -159,24 +160,30 @@ export default function ScanScreen() {
           </ScrollView>
         )}
 
-        {/* Reset Button */}
-        {!isScanning && (
-          <MotiView
-            from={{ opacity: 0, scale: 0 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ type: 'spring', delay: 300 }}
-            className="p-4"
-          >
-            <TouchableOpacity
-              onPress={resetScan}
-              className="bg-neon-magenta px-6 py-3 rounded-full flex-row items-center justify-center"
-              activeOpacity={0.8}
+        {/* Reset Button (positioned above floating tab bar) */}
+        {!isScanning && (() => {
+          const tabBarGap = 12; // matches tab layout bottom offset gap
+          const tabBarHeight = 64; // matches tab bar height
+          const gapAboveTab = 12; // space above tab bar
+          const bottomOffset = (insets.bottom || 0) + tabBarGap + tabBarHeight + gapAboveTab;
+          return (
+            <MotiView
+              from={{ opacity: 0, scale: 0 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ type: 'spring', delay: 300 }}
+              style={{ position: 'absolute', left: 0, right: 0, bottom: bottomOffset, paddingHorizontal: 24 }}
             >
-              <RotateCcw size={20} color="#fff" />
-              <Text className="text-white font-bold ml-2">Scan Another</Text>
-            </TouchableOpacity>
-          </MotiView>
-        )}
+              <TouchableOpacity
+                onPress={resetScan}
+                className="bg-neon-magenta px-6 py-3 rounded-full flex-row items-center justify-center"
+                activeOpacity={0.8}
+              >
+                <RotateCcw size={20} color="#fff" />
+                <Text className="text-white font-bold ml-2">Scan Another</Text>
+              </TouchableOpacity>
+            </MotiView>
+          );
+        })()}
       </SafeAreaView>
     </GradientBackground>
   );
