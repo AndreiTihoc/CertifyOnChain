@@ -25,12 +25,12 @@ export function FloatingActionButton({ onPress }: FloatingActionButtonProps) {
     >
       <TouchableOpacity onPress={onPress} activeOpacity={0.8} accessibilityLabel="Add Certificate">
         <LinearGradient
-          colors={['#00f5d4', '#ff3cac']}
-          className="w-14 h-14 rounded-full items-center justify-center shadow-lg"
+          colors={['#34d399', '#22d3ee', '#a78bfa']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
+          style={{ width:56, height:56, borderRadius:32, alignItems:'center', justifyContent:'center', shadowColor:'#34d399', shadowOpacity:0.6, shadowRadius:16, shadowOffset:{ width:0, height:4 } }}
         >
-          <Text className="text-white text-2xl font-bold">+</Text>
+          <Text style={{ color:'#fff', fontSize:30, fontWeight:'700', textShadowColor:'#34d399', textShadowRadius:12 }}>+</Text>
         </LinearGradient>
       </TouchableOpacity>
     </MotiView>

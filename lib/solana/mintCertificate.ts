@@ -1,6 +1,7 @@
 import { getMetaplex, setMetaplexIdentity } from './connection';
 import { getOrCreateIssuerKeypair } from './wallet';
 import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Certificate } from '../../types/certificate';
 
 export interface MintParams {
   title: string;
@@ -14,6 +15,7 @@ export interface MintResult {
   mintAddress: string;
   metadataUri: string;
   issuer: string;
+  certificate: Certificate; // enriched local representation (not necessarily fully on-chain yet)
 }
 
 export const mintCertificate = async (params: MintParams): Promise<MintResult> => {
@@ -53,7 +55,18 @@ export const mintCertificate = async (params: MintParams): Promise<MintResult> =
       tokenOwner: recipientPk,
       isMutable: true,
     });
-    return { mintAddress: nft.address.toBase58(), metadataUri: nft.uri ?? '', issuer: issuerKp.publicKey.toBase58() };
+    const certificate: Certificate = {
+      id: nft.address.toBase58(),
+      title: title,
+      issuer: issuerKp.publicKey.toBase58(),
+      dateIssued: new Date().toISOString().split('T')[0],
+      isVerified: true,
+      description: params.description,
+      recipient: params.recipient,
+      expiry: undefined, // expiry not yet on-chain; will be added when metadata upload implemented
+      fileUri: params.fileUri,
+    };
+    return { mintAddress: nft.address.toBase58(), metadataUri: nft.uri ?? '', issuer: issuerKp.publicKey.toBase58(), certificate };
   } catch (e: any) {
     // Common simulation error mapping
     const msg: string = e?.message || '';

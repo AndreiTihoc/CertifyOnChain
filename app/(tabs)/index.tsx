@@ -7,7 +7,6 @@ import { MotiView } from 'moti';
 import { GradientBackground } from '../../components/GradientBackground';
 import { CertificateCard } from '../../components/CertificateCard';
 import { FloatingActionButton } from '../../components/FloatingActionButton';
-import { mockCertificates } from '../../data/mockData';
 import { Certificate } from '../../types/certificate';
 // Solana helpers (statically imported to avoid TS dynamic import config issues)
 import { fetchCertificatesForOwner } from '../../lib/solana/fetchCertificates';
@@ -15,7 +14,7 @@ import { getOrCreateIssuerKeypair, getStoredIssuerKeypair } from '../../lib/sola
 import { mintCertificate } from '../../lib/solana/mintCertificate';
 
 export default function HomeScreen() {
-  const [certificates, setCertificates] = useState<Certificate[]>(mockCertificates);
+  const [certificates, setCertificates] = useState<Certificate[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [formRecipient, setFormRecipient] = useState('');
   const [formTitle, setFormTitle] = useState('');
@@ -34,17 +33,7 @@ export default function HomeScreen() {
   const [walletPubkey, setWalletPubkey] = useState<string | null>(null);
   const [chainEnabled, setChainEnabled] = useState(false);
 
-  // On mount, if a stored wallet already exists, auto-enable chain & fetch
-  useEffect(() => {
-    (async () => {
-      try {
-        const stored = await getStoredIssuerKeypair();
-        if (stored) {
-          setChainEnabled(true); // triggers chain effect below
-        }
-      } catch {}
-    })();
-  }, []);
+  // Persistence removed: no auto-enable on mount
 
   useEffect(() => {
     if (chainEnabled && !walletPubkey) {
@@ -115,13 +104,16 @@ export default function HomeScreen() {
       try {
         const result = await mintCertificate({
           title: formTitle.trim(),
-          description: formDescription.trim() || undefined,
-          recipient: formRecipient.trim(),
-          fileUri: formFileUri.trim() || undefined,
-          issuer: formIssuer.trim(),
+            description: formDescription.trim() || undefined,
+            recipient: formRecipient.trim(),
+            fileUri: formFileUri.trim() || undefined,
+            issuer: formIssuer.trim(),
         });
-        // After mint, re-sync on-chain certificates
-        await loadOnChain();
+        // Optimistically include local params (expiry not yet on-chain, but user entered it) by merging
+        const enriched = { ...result.certificate, expiry: formExpiry.trim() || undefined };
+        setCertificates(prev => [enriched, ...prev]);
+        // Optionally still refresh chain in background (non-blocking)
+        loadOnChain();
         Alert.alert('Minted', 'Certificate minted: ' + result.mintAddress.slice(0,8) + '...');
       } catch (e:any) {
         Alert.alert('Mint Error', e?.message || 'Failed to mint');
@@ -139,7 +131,7 @@ export default function HomeScreen() {
         fileUri: formFileUri.trim() || undefined,
       };
       setCertificates(prev => [newCert, ...prev]);
-      Alert.alert('Certificate Added', 'Certificate added locally.');
+  Alert.alert('Certificate Added', 'Certificate added locally.');
     }
     // reset form
     setFormRecipient('');
@@ -331,7 +323,7 @@ export default function HomeScreen() {
                   <DetailField label="Issued" value={selectedCert.dateIssued} />
                   {selectedCert.description && <DetailField label="Description" value={selectedCert.description} multiline />}
                   {selectedCert.recipient && <DetailField label="Recipient" value={selectedCert.recipient} />}
-                  {selectedCert.expiry && <DetailField label="Expiry" value={selectedCert.expiry} />}
+                  {selectedCert.expiry && <DetailField label="Expiry Date" value={selectedCert.expiry} />}
                   {selectedCert.fileUri && (
                     <View style={{ marginBottom:12 }}>
                       <Text style={{ color:'#8aa', fontSize:12, fontWeight:'600', marginBottom:4 }}>FILE LINK</Text>

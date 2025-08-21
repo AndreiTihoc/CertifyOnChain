@@ -1,23 +1,12 @@
-// @ts-ignore - react-native environment provides types
+// Ephemeral in‑memory keypair handling (no long-term persistence)
+// Legacy storage key kept for purge of previously stored keypairs
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Keypair } from '@solana/web3.js';
 import 'react-native-get-random-values';
 
-const STORAGE_KEY = 'issuer_keypair_v1';
+const LEGACY_STORAGE_KEY = 'issuer_keypair_v1';
 
-export interface StoredKeypair {
-  publicKey: string;
-  secretKey: number[]; // raw secret key bytes
-}
-
-const encodeKeypair = (kp: Keypair): StoredKeypair => ({
-  publicKey: kp.publicKey.toBase58(),
-  secretKey: Array.from(kp.secretKey),
-});
-
-const decodeKeypair = (data: StoredKeypair): Keypair => {
-  return Keypair.fromSecretKey(Uint8Array.from(data.secretKey));
-};
+let cachedKp: Keypair | null = null; // session-only
 
 function insecureRandomBytes(len: number): Uint8Array {
   const arr = new Uint8Array(len);
@@ -50,41 +39,26 @@ function ensureCrypto() {
 
 export const getOrCreateIssuerKeypair = async (): Promise<Keypair> => {
   ensureCrypto();
+  if (cachedKp) return cachedKp;
   try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed: StoredKeypair = JSON.parse(raw);
-      return decodeKeypair(parsed);
-    }
+    cachedKp = Keypair.generate();
   } catch (e) {
-    console.warn('Keypair load failed, generating new', e);
-  }
-  let kp: Keypair;
-  try {
-    kp = Keypair.generate();
-  } catch (e) {
-    console.warn('Secure Keypair.generate failed, using insecure fallback', e);
-    // Fallback: construct a Keypair manually from random bytes (ED25519 needs 64 bytes seed-secret derivation handled by Keypair.fromSeed if supported)
-    // Use generate again after seeding crypto; if still fails rethrow
+    console.warn('Secure Keypair.generate failed, retrying with crypto ensure', e);
     ensureCrypto();
-    kp = Keypair.generate();
+    cachedKp = Keypair.generate();
   }
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(encodeKeypair(kp)));
-  } catch (e) {
-    console.warn('Keypair save failed', e);
-  }
-  return kp;
+  return cachedKp;
 };
 
 export const getStoredIssuerKeypair = async (): Promise<Keypair | null> => {
-  try {
-    const raw = await AsyncStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed: StoredKeypair = JSON.parse(raw);
-    return decodeKeypair(parsed);
-  } catch (e) {
-    console.warn('Failed to load stored keypair', e);
-    return null;
-  }
+  // No persistence anymore; return in-memory if exists
+  return cachedKp;
+};
+
+export const resetIssuerKeypair = async (): Promise<void> => {
+  cachedKp = null;
+};
+
+export const purgeLegacyStoredKeypair = async (): Promise<void> => {
+  try { await AsyncStorage.removeItem(LEGACY_STORAGE_KEY); } catch {}
 };
