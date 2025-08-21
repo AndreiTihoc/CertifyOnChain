@@ -1,15 +1,29 @@
-import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 import { router } from 'expo-router';
+import { getOrCreateIssuerKeypair } from '../lib/solana/wallet';
 import { GradientBackground } from '../components/GradientBackground';
 
 export default function WelcomeScreen() {
-  const handleConnectWallet = () => {
-    // Navigate to main app (tabs)
-    router.replace('/(tabs)');
+  const [connecting, setConnecting] = useState(false);
+  const [pubkey, setPubkey] = useState<string | null>(null);
+
+  const handleConnectWallet = async () => {
+    if (connecting) return;
+    setConnecting(true);
+    try {
+      const kp = await getOrCreateIssuerKeypair();
+      setPubkey(kp.publicKey.toBase58());
+      // slight delay for UX feedback
+      setTimeout(() => router.replace('/(tabs)'), 300);
+    } catch (e:any) {
+      Alert.alert('Wallet Error', 'Failed to initialize wallet:\n' + (e?.message || String(e)));
+    } finally {
+      setConnecting(false);
+    }
   };
 
   return (
@@ -60,12 +74,24 @@ export default function WelcomeScreen() {
               end={{ x: 1, y: 1 }}
               className="py-4 px-8 rounded-2xl"
             >
-              <Text className="text-white text-xl font-bold text-center">
-                Connect Wallet
-              </Text>
+              {connecting ? (
+                <View className="flex-row justify-center items-center">
+                  <ActivityIndicator color="#fff" />
+                  <Text className="text-white text-lg font-semibold ml-3">Connecting...</Text>
+                </View>
+              ) : (
+                <Text className="text-white text-xl font-bold text-center">
+                  {pubkey ? 'Continue' : 'Connect Wallet'}
+                </Text>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </MotiView>
+        {pubkey && !connecting && (
+          <Text className="text-gray-400 text-xs mt-4" selectable>
+            Wallet: {pubkey.slice(0,8)}...{pubkey.slice(-8)}
+          </Text>
+        )}
 
         {/* Features */}
         <MotiView

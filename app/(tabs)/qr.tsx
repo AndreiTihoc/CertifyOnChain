@@ -1,19 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { MotiView } from 'moti';
 import { Copy } from 'lucide-react-native';
 import { GradientBackground } from '../../components/GradientBackground';
-import { mockWalletData } from '../../data/mockData';
+import { getStoredIssuerKeypair } from '../../lib/solana/wallet';
 import * as Clipboard from 'expo-clipboard';
 
 export default function QRScreen() {
-  const [walletKey] = useState(mockWalletData.publicKey);
+  const [walletKey, setWalletKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const kp = await getStoredIssuerKeypair();
+        if (kp) setWalletKey(kp.publicKey.toBase58());
+      } catch {}
+    })();
+  }, []);
 
   const copyToClipboard = async () => {
-    await Clipboard.setStringAsync(walletKey);
-    Alert.alert('Copied!', 'Wallet address copied to clipboard');
+  if (!walletKey) return;
+  await Clipboard.setStringAsync(walletKey);
+  Alert.alert('Copied!', 'Wallet address copied to clipboard');
   };
 
   return (
@@ -44,7 +54,7 @@ export default function QRScreen() {
           >
             <View className="bg-white p-6 rounded-3xl shadow-lg">
               <QRCode
-                value={walletKey}
+                value={walletKey || 'NoWallet'}
                 size={250}
                 color="#000"
                 backgroundColor="#fff"
@@ -65,9 +75,15 @@ export default function QRScreen() {
             <Text className="text-gray-300 text-center mb-2 text-sm">
               Wallet Address:
             </Text>
-            <Text className="text-white text-center font-mono text-xs bg-gray-800 px-4 py-2 rounded-lg">
-              {walletKey.slice(0, 20)}...{walletKey.slice(-10)}
-            </Text>
+            {walletKey ? (
+              <Text className="text-white text-center font-mono text-xs bg-gray-800 px-4 py-2 rounded-lg">
+                {walletKey.slice(0, 20)}...{walletKey.slice(-10)}
+              </Text>
+            ) : (
+              <Text className="text-gray-500 text-center font-mono text-xs bg-gray-800 px-4 py-2 rounded-lg">
+                No wallet yet
+              </Text>
+            )}
           </MotiView>
 
           {/* Copy Button */}
@@ -78,11 +94,12 @@ export default function QRScreen() {
           >
             <TouchableOpacity
               onPress={copyToClipboard}
+              disabled={!walletKey}
               className="bg-neon-blue px-6 py-3 rounded-full flex-row items-center"
               activeOpacity={0.8}
             >
               <Copy size={20} color="#fff" />
-              <Text className="text-white font-bold ml-2">Copy Address</Text>
+              <Text className="text-white font-bold ml-2">{walletKey ? 'Copy Address' : 'No Wallet'}</Text>
             </TouchableOpacity>
           </MotiView>
         </View>

@@ -6,14 +6,18 @@ import { MotiView } from 'moti';
 import { ScanLine, RotateCcw } from 'lucide-react-native';
 import { GradientBackground } from '../../components/GradientBackground';
 import { CertificateCard } from '../../components/CertificateCard';
-import { mockScanResults } from '../../data/mockData';
-import { WalletData } from '../../types/certificate';
+import { Certificate } from '../../types/certificate';
+import { fetchCertificatesForOwner } from '../../lib/solana/fetchCertificates';
+import { getStoredIssuerKeypair } from '../../lib/solana/wallet';
 
 export default function ScanScreen() {
   const insets = useSafeAreaInsets();
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
-  const [scannedData, setScannedData] = useState<WalletData | null>(null);
+  // removed mock scannedData
+  const [scannedWallet, setScannedWallet] = useState<string | null>(null);
+  const [scannedCerts, setScannedCerts] = useState<Certificate[] | null>(null);
+  const [loading, setLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(true);
 
   useEffect(() => {
@@ -25,27 +29,30 @@ export default function ScanScreen() {
     getCameraPermissions();
   }, []);
 
-  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+  const handleBarCodeScanned = async ({ data }: { type: string; data: string }) => {
     if (scanned) return;
-    
     setScanned(true);
     setIsScanning(false);
-    
-    // Simulate fetching certificates from scanned wallet
-    setTimeout(() => {
-      setScannedData(mockScanResults);
-      Alert.alert(
-        'Wallet Scanned!', 
-        `Found ${mockScanResults.certificates.length} certificates`,
-        [{ text: 'OK' }]
-      );
-    }, 1000);
+    setLoading(true);
+    try {
+      setScannedWallet(data.trim());
+      const issuer = await getStoredIssuerKeypair();
+      const certs = await fetchCertificatesForOwner(data.trim(), issuer?.publicKey.toBase58());
+      setScannedCerts(certs);
+      Alert.alert('Wallet Scanned!', `Found ${certs.length} certificates`);
+    } catch (e:any) {
+      Alert.alert('Scan Error', e?.message || 'Failed to fetch certificates');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const resetScan = () => {
     setScanned(false);
-    setScannedData(null);
+    setScannedWallet(null);
+    setScannedCerts(null);
     setIsScanning(true);
+    setLoading(false);
   };
 
   if (hasPermission === null) {
@@ -134,7 +141,7 @@ export default function ScanScreen() {
         ) : (
           // Scanned Results
           <ScrollView className="flex-1 px-4" showsVerticalScrollIndicator={false}>
-            {scannedData && (
+            {scannedWallet && (
               <MotiView
                 from={{ opacity: 0, translateY: 50 }}
                 animate={{ opacity: 1, translateY: 0 }}
@@ -143,16 +150,19 @@ export default function ScanScreen() {
                 <View className="mb-4 p-4 bg-gray-800 rounded-2xl">
                   <Text className="text-gray-300 text-sm mb-1">Scanned Wallet:</Text>
                   <Text className="text-white font-mono text-xs">
-                    {scannedData.publicKey.slice(0, 20)}...{scannedData.publicKey.slice(-10)}
+                    {scannedWallet.slice(0, 20)}...{scannedWallet.slice(-10)}
                   </Text>
                 </View>
-                
-                {scannedData.certificates.map((certificate, index) => (
+                {loading && <Text className="text-gray-400 mb-4">Loading certificates...</Text>}
+                {!loading && scannedCerts && scannedCerts.length === 0 && (
+                  <Text className="text-gray-400 mb-4">No certificates found.</Text>
+                )}
+                {scannedCerts && scannedCerts.map((certificate, index) => (
                   <CertificateCard
                     key={certificate.id}
                     certificate={certificate}
                     index={index}
-                    onPress={() => Alert.alert('Certificate Details', certificate.description || 'No description available')}
+                    onPress={() => Alert.alert('Certificate', certificate.title)}
                   />
                 ))}
               </MotiView>
@@ -161,29 +171,23 @@ export default function ScanScreen() {
         )}
 
         {/* Reset Button (positioned above floating tab bar) */}
-        {!isScanning && (() => {
-          const tabBarGap = 12; // matches tab layout bottom offset gap
-          const tabBarHeight = 64; // matches tab bar height
-          const gapAboveTab = 12; // space above tab bar
-          const bottomOffset = (insets.bottom || 0) + tabBarGap + tabBarHeight + gapAboveTab;
-          return (
-            <MotiView
-              from={{ opacity: 0, scale: 0 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: 'spring', delay: 300 }}
-              style={{ position: 'absolute', left: 0, right: 0, bottom: bottomOffset, paddingHorizontal: 24 }}
+        {!isScanning && (
+          <MotiView
+            from={{ opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ type: 'spring', delay: 300 }}
+            style={{ position: 'absolute', left: 0, right: 0, bottom: (insets.bottom || 0) + 12 + 64 + 12, paddingHorizontal: 24 }}
+          >
+            <TouchableOpacity
+              onPress={resetScan}
+              className="bg-neon-magenta px-6 py-3 rounded-full flex-row items-center justify-center"
+              activeOpacity={0.8}
             >
-              <TouchableOpacity
-                onPress={resetScan}
-                className="bg-neon-magenta px-6 py-3 rounded-full flex-row items-center justify-center"
-                activeOpacity={0.8}
-              >
-                <RotateCcw size={20} color="#fff" />
-                <Text className="text-white font-bold ml-2">Scan Another</Text>
-              </TouchableOpacity>
-            </MotiView>
-          );
-        })()}
+              <RotateCcw size={20} color="#fff" />
+              <Text className="text-white font-bold ml-2">Scan Another</Text>
+            </TouchableOpacity>
+          </MotiView>
+        )}
       </SafeAreaView>
     </GradientBackground>
   );

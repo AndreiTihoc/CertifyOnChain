@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, Alert, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as DocumentPicker from 'expo-document-picker';
@@ -9,6 +9,10 @@ import { CertificateCard } from '../../components/CertificateCard';
 import { FloatingActionButton } from '../../components/FloatingActionButton';
 import { mockCertificates } from '../../data/mockData';
 import { Certificate } from '../../types/certificate';
+// Solana helpers (statically imported to avoid TS dynamic import config issues)
+import { fetchCertificatesForOwner } from '../../lib/solana/fetchCertificates';
+import { getOrCreateIssuerKeypair, getStoredIssuerKeypair } from '../../lib/solana/wallet';
+import { mintCertificate } from '../../lib/solana/mintCertificate';
 
 export default function HomeScreen() {
   const [certificates, setCertificates] = useState<Certificate[]>(mockCertificates);
@@ -26,6 +30,63 @@ export default function HomeScreen() {
   const today = new Date().toISOString().split('T')[0];
   const [selectedCert, setSelectedCert] = useState<Certificate | null>(null);
   const certCount = certificates.length;
+  const [loadingChain, setLoadingChain] = useState(false);
+  const [walletPubkey, setWalletPubkey] = useState<string | null>(null);
+  const [chainEnabled, setChainEnabled] = useState(false);
+
+  // On mount, if a stored wallet already exists, auto-enable chain & fetch
+  useEffect(() => {
+    (async () => {
+      try {
+        const stored = await getStoredIssuerKeypair();
+        if (stored) {
+          setChainEnabled(true); // triggers chain effect below
+        }
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (chainEnabled && !walletPubkey) {
+      (async () => {
+        try {
+          setLoadingChain(true);
+          // Try stored first (no dummy wipe if already existed)
+          const stored = await getStoredIssuerKeypair();
+          let kp;
+          if (stored) {
+            kp = stored;
+          } else {
+            kp = await getOrCreateIssuerKeypair();
+            // New wallet generated: clear existing dummy/local certificates
+            setCertificates([]);
+          }
+          setWalletPubkey(kp.publicKey.toBase58());
+          // Fetch chain certificates immediately
+          const chainCerts = await fetchCertificatesForOwner(kp.publicKey.toBase58(), kp.publicKey.toBase58());
+          setCertificates(chainCerts);
+        } catch (e) {
+          console.warn('Wallet init failed', e);
+        } finally {
+          setLoadingChain(false);
+        }
+      })();
+    }
+  }, [chainEnabled, walletPubkey]);
+
+  const loadOnChain = async () => {
+    if (!walletPubkey) return;
+    try {
+      setLoadingChain(true);
+      const kp = await getStoredIssuerKeypair();
+      const onChain = await fetchCertificatesForOwner(walletPubkey, kp?.publicKey.toBase58());
+      setCertificates(onChain);
+    } catch (e) {
+      console.warn('On-chain fetch failed', e);
+    } finally {
+      setLoadingChain(false);
+    }
+  };
 
   const handleAddCertificate = () => setShowForm(true);
 
@@ -50,18 +111,36 @@ export default function HomeScreen() {
     setSubmitting(true);
     const ok = await validateForm();
     if (!ok) { setSubmitting(false); return; }
-    const newCert: Certificate = {
-      id: Date.now().toString(),
-      title: formTitle.trim(),
-      issuer: formIssuer.trim(),
-      dateIssued: formIssueDate,
-      isVerified: true,
-      description: formDescription.trim() || undefined,
-      recipient: formRecipient.trim(),
-      expiry: formExpiry.trim() || undefined,
-      fileUri: formFileUri.trim() || undefined,
-    };
-    setCertificates(prev => [newCert, ...prev]);
+    if (chainEnabled && walletPubkey) {
+      try {
+        const result = await mintCertificate({
+          title: formTitle.trim(),
+          description: formDescription.trim() || undefined,
+          recipient: formRecipient.trim(),
+          fileUri: formFileUri.trim() || undefined,
+          issuer: formIssuer.trim(),
+        });
+        // After mint, re-sync on-chain certificates
+        await loadOnChain();
+        Alert.alert('Minted', 'Certificate minted: ' + result.mintAddress.slice(0,8) + '...');
+      } catch (e:any) {
+        Alert.alert('Mint Error', e?.message || 'Failed to mint');
+      }
+    } else {
+      const newCert: Certificate = {
+        id: Date.now().toString(),
+        title: formTitle.trim(),
+        issuer: formIssuer.trim(),
+        dateIssued: formIssueDate,
+        isVerified: true,
+        description: formDescription.trim() || undefined,
+        recipient: formRecipient.trim(),
+        expiry: formExpiry.trim() || undefined,
+        fileUri: formFileUri.trim() || undefined,
+      };
+      setCertificates(prev => [newCert, ...prev]);
+      Alert.alert('Certificate Added', 'Certificate added locally.');
+    }
     // reset form
     setFormRecipient('');
     setFormTitle('');
@@ -74,7 +153,6 @@ export default function HomeScreen() {
     setFormErrors({});
     setShowForm(false);
     setSubmitting(false);
-    Alert.alert('Certificate Added', 'Certificate added locally.');
   };
 
   const handleCancel = () => {
@@ -97,8 +175,18 @@ export default function HomeScreen() {
               My Certificates
             </Text>
             <Text className="text-gray-300 text-center">
-              {certCount} certificate{certCount !== 1 ? 's' : ''} in your collection
+              {certCount} certificate{certCount !== 1 ? 's' : ''} in your collection {chainEnabled && walletPubkey ? '\nWallet: ' + walletPubkey.slice(0,4)+'...'+walletPubkey.slice(-4) : ''}
             </Text>
+            <View className="flex-row justify-center mt-3 gap-3">
+              <TouchableOpacity onPress={()=> setChainEnabled(e=>!e)} style={{ backgroundColor: chainEnabled ? '#0a3' : '#223', paddingVertical:8, paddingHorizontal:14, borderRadius:20 }}>
+                <Text style={{ color:'white', fontSize:12, fontWeight:'600' }}>{chainEnabled ? 'Chain Enabled' : 'Enable Chain'}</Text>
+              </TouchableOpacity>
+              {chainEnabled && (
+                <TouchableOpacity disabled={loadingChain || !walletPubkey} onPress={loadOnChain} style={{ backgroundColor:'#182033', paddingVertical:8, paddingHorizontal:14, borderRadius:20, opacity: loadingChain?0.6:1 }}>
+                  <Text style={{ color:'#4dd9ff', fontSize:12, fontWeight:'600' }}>{loadingChain ? 'Loading...' : 'Sync On-Chain'}</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </MotiView>
 
           {/* Certificates List */}
