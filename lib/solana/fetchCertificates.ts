@@ -17,7 +17,8 @@ export const fetchCertificatesForOwner = async (owner: string, issuerPubkey?: st
       let json: any = anyNft.json;
       try {
         if (!json && anyNft.uri) {
-          const resp = await fetch(anyNft.uri);
+          const metaUri: string = anyNft.uri;
+          const resp = await fetch(metaUri);
             if (resp.ok) json = await resp.json();
         }
       } catch {}
@@ -41,6 +42,9 @@ export const fetchCertificatesForOwner = async (owner: string, issuerPubkey?: st
         fileUri = json.properties.files[0].uri;
       }
 
+      // Gateway resolve fileUri if ipfs
+  const resolvedFileUri = fileUri;
+
       certs.push({
         id: (anyNft.address ?? anyNft.mintAddress ?? anyNft.mint)?.toBase58?.() || 'unknown',
         title: anyNft.name || json?.name || 'Certificate',
@@ -49,7 +53,7 @@ export const fetchCertificatesForOwner = async (owner: string, issuerPubkey?: st
         isVerified: issuerPubkey ? updateAuth === issuerPubkey : true,
         description,
         expiry,
-        fileUri,
+  fileUri: resolvedFileUri,
         recipient,
       });
     }
