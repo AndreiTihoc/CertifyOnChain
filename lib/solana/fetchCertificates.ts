@@ -41,6 +41,9 @@ export const fetchCertificatesForOwner = async (owner: string, issuerPubkey?: st
       if (!fileUri && json?.properties?.files && Array.isArray(json.properties.files) && json.properties.files[0]?.uri) {
         fileUri = json.properties.files[0].uri;
       }
+      if (!fileUri && json?.image) {
+        fileUri = json.image;
+      }
 
       // Gateway resolve fileUri if ipfs
   const resolvedFileUri = fileUri;

@@ -4,7 +4,7 @@ import { PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { Certificate } from '../../types/certificate';
 import * as FileSystem from 'expo-file-system';
 import { hasSupabase } from '../supabaseClient';
-import { uploadFileToSupabase, uploadMetadataToSupabase } from './uploadSupabase';
+import { uploadFileDirect, uploadMetadataDirect } from './uploadSupabaseDirect';
 
 export interface MintParams {
   title: string;
@@ -21,6 +21,13 @@ export interface MintResult {
   certificate: Certificate; // enriched local representation (not necessarily fully on-chain yet)
 }
 
+function assertValidUri(u: string) {
+  if (!u) throw new Error('metadataUri empty');
+  if (!u.startsWith('https://')) throw new Error('metadataUri must start with https://');
+  try { new URL(u); } catch { throw new Error(`metadataUri invalid URL: ${u}`); }
+  if (u.length > 200) throw new Error(`metadataUri too long (${u.length} > 200). Use shorter filename/path.`);
+}
+
 export const mintCertificate = async (params: MintParams): Promise<MintResult> => {
   const issuerKp = await getOrCreateIssuerKeypair();
   const metaplex = setMetaplexIdentity(issuerKp);
@@ -33,8 +40,9 @@ export const mintCertificate = async (params: MintParams): Promise<MintResult> =
   if (balance < minLamports) {
     try {
       const airdropAmount = 1 * LAMPORTS_PER_SOL;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
       const sig = await connection.requestAirdrop(issuerKp.publicKey, airdropAmount);
-      await connection.confirmTransaction(sig, 'confirmed');
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
       balance = await connection.getBalance(issuerKp.publicKey);
       console.log('[mintCertificate] post-airdrop balance', balance / LAMPORTS_PER_SOL);
     } catch (e:any) {
@@ -54,60 +62,51 @@ export const mintCertificate = async (params: MintParams): Promise<MintResult> =
 
   try {
     const { title } = params;
-    // Supabase-first pipeline. Fallback to inline data URIs only when Supabase unavailable or failing.
+    // Supabase-only metadata URI (required). No inline fallback for on-chain URI.
     let uploadedFileUri: string | undefined;
     let metadataUri: string;
 
-    if (params.fileUri && hasSupabase) {
-      try {
-        const fileUp = await uploadFileToSupabase(params.fileUri, 'cert-files');
-        uploadedFileUri = fileUp.publicUrl;
-        console.log('[mintCertificate] file uploaded via Supabase', uploadedFileUri);
-      } catch (e) {
-        console.warn('[mintCertificate] Supabase file upload failed, attempting inline fallback', e);
-        try { uploadedFileUri = await inlineDataUriFromLocal(params.fileUri); } catch {}
-      }
-    } else if (params.fileUri) {
-      try { uploadedFileUri = await inlineDataUriFromLocal(params.fileUri); } catch {}
+    console.log('[mintCertificate] hasSupabase?', hasSupabase);
+    if (!hasSupabase) {
+      throw new Error('Supabase not configured. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY, then restart.');
     }
 
-    if (hasSupabase) {
+    if (params.fileUri) {
       try {
-        const metaUp = await uploadMetadataToSupabase({
-          name: params.title,
-          symbol: 'CERT',
-          description: params.description,
-          issuer: issuerKp.publicKey.toBase58(),
-          recipient: params.recipient,
-          dateIssued: new Date().toISOString().split('T')[0],
-          file: uploadedFileUri,
-          expiry: undefined,
-        }, 'cert-meta');
-        metadataUri = metaUp.publicUrl!;
-        console.log('[mintCertificate] metadata uploaded via Supabase', metadataUri);
+        const fileUp = await uploadFileDirect(params.fileUri, 'cert-files');
+        uploadedFileUri = fileUp.publicUrl;
+        console.log('[mintCertificate] file uploaded via Supabase (REST)', uploadedFileUri);
       } catch (e) {
-        console.warn('[mintCertificate] Supabase metadata upload failed, using inline fallback', e);
-        metadataUri = await inlineMetadataDataUri({
-          title: params.title,
-          description: params.description,
-          issuer: issuerKp.publicKey.toBase58(),
-          recipient: params.recipient,
-          dateIssued: new Date().toISOString().split('T')[0],
-          fileUri: uploadedFileUri,
-          expiry: undefined,
-        });
+        console.warn('[mintCertificate] Supabase file upload failed (REST)', e);
+        throw new Error('File upload to Supabase failed; cannot mint without a hosted metadata URI.');
       }
-    } else {
-      metadataUri = await inlineMetadataDataUri({
-        title: params.title,
+    }
+
+    try {
+      const metaUp = await uploadMetadataDirect({
+        name: params.title,
+        symbol: 'CERT',
         description: params.description,
+        image: uploadedFileUri ?? undefined,
+        properties: { files: uploadedFileUri ? [{ uri: uploadedFileUri }] : [] },
+        attributes: [
+          { trait_type: 'Issuer', value: issuerKp.publicKey.toBase58() },
+          { trait_type: 'Recipient', value: params.recipient },
+          { trait_type: 'Date Issued', value: new Date().toISOString().split('T')[0] },
+        ],
         issuer: issuerKp.publicKey.toBase58(),
         recipient: params.recipient,
         dateIssued: new Date().toISOString().split('T')[0],
-        fileUri: uploadedFileUri,
+        file: uploadedFileUri,
         expiry: undefined,
-      });
-      console.log('[mintCertificate] inline metadata URI length', metadataUri.length);
+      }, 'cert-meta');
+      metadataUri = metaUp.publicUrl!;
+      assertValidUri(metadataUri);
+      console.log('[mintCertificate] metadata uploaded via Supabase (REST)', metadataUri);
+    } catch (e: any) {
+      console.warn('[mintCertificate] Supabase metadata upload failed', e);
+      const msg = e?.message || JSON.stringify(e);
+      throw new Error('Metadata upload to Supabase failed: ' + msg + ' (cannot mint without a hosted JSON URI)');
     }
 
   console.log('[mintCertificate] creating NFT with URI prefix', metadataUri.slice(0,30), 'len', metadataUri.length);
