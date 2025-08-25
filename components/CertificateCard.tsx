@@ -1,10 +1,11 @@
 import React from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Image } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MotiView } from 'moti';
 import { Easing } from 'react-native-reanimated';
 import { Certificate } from '../types/certificate';
-import { VerifiedBadge } from './VerifiedBadge';
+// Removed VerifiedBadge display per request
+import { WebView } from 'react-native-webview';
 
 interface CertificateCardProps {
   certificate: Certificate;
@@ -13,6 +14,60 @@ interface CertificateCardProps {
 }
 
 export function CertificateCard({ certificate, onPress, index = 0 }: CertificateCardProps) {
+  const fileUri = certificate.fileUri;
+  const lower = fileUri?.toLowerCase() || '';
+  const isPdf = !!fileUri && lower.endsWith('.pdf');
+  const isImage = !!fileUri && (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg'));
+  const previewWidth = 96;
+  const previewHeight = 72;
+  const pdfPreviewHtml = fileUri ? `<!doctype html>
+  <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <style>
+        html, body { margin:0; padding:0; background: transparent; overflow:hidden; }
+        .wrap { width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; background: transparent; }
+        canvas { display:block; max-width:100%; max-height:100%; }
+        ::-webkit-scrollbar { display:none; }
+      </style>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+      <script>
+        document.addEventListener('DOMContentLoaded', function() {
+          try {
+            // Configure worker from CDN
+            // eslint-disable-next-line no-undef
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            const url = '${fileUri.replace(/'/g, "%27")}';
+            // eslint-disable-next-line no-undef
+            const loadingTask = pdfjsLib.getDocument({ url, withCredentials: false });
+            loadingTask.promise.then(function(pdf) {
+              return pdf.getPage(1);
+            }).then(function(page) {
+              const container = document.querySelector('.wrap');
+              const canvas = document.getElementById('c');
+              const ctx = canvas.getContext('2d');
+              // Base viewport to compute scale
+              const vp = page.getViewport({ scale: 1 });
+              const targetW = container.clientWidth;
+              const targetH = container.clientHeight;
+              const scale = Math.min(targetW / vp.width, targetH / vp.height);
+              const v2 = page.getViewport({ scale: Math.max(0.2, Math.min(2, scale)) });
+              canvas.width = v2.width;
+              canvas.height = v2.height;
+              page.render({ canvasContext: ctx, viewport: v2 });
+            }).catch(function(err){
+              console.error('pdf.js render error', err);
+            });
+          } catch(e) {
+            console.error('pdf.js init error', e);
+          }
+        });
+      </script>
+    </head>
+    <body>
+      <div class="wrap"><canvas id="c"></canvas></div>
+    </body>
+  </html>` : undefined;
   return (
     <MotiView
       from={{ opacity: 0, translateY: 50 }}
@@ -56,8 +111,25 @@ export function CertificateCard({ certificate, onPress, index = 0 }: Certificate
               <View style={{ position:'absolute', bottom:0, left:0, width:18, height:18, borderBottomLeftRadius:18, borderColor:'#0ad', borderBottomWidth:1.2, borderLeftWidth:1.2, opacity:0.3 }} />
               <View style={{ position:'absolute', bottom:0, right:0, width:18, height:18, borderBottomRightRadius:18, borderColor:'#0ad', borderBottomWidth:1.2, borderRightWidth:1.2, opacity:0.5 }} />
 
-              <View style={{ flexDirection:'row', justifyContent:'space-between', marginBottom:8 }}>
-                <View style={{ flex:1, paddingRight:10 }}>
+              <View style={{ flexDirection:'row', alignItems:'center', gap:12, marginBottom:8 }}>
+                {/* Preview thumb (image or PDF via Google Docs viewer) */}
+                {!!fileUri && (
+                  <View style={{ width: previewWidth, height: previewHeight, borderRadius: 10, overflow:'hidden', backgroundColor:'#0e1724', borderWidth:1, borderColor:'rgba(255,255,255,0.06)' }} pointerEvents="none">
+                    {isImage ? (
+                      <Image source={{ uri: fileUri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : isPdf ? (
+                      <WebView
+                        source={{ html: pdfPreviewHtml! }}
+                        style={{ width: '100%', height: '100%', backgroundColor: 'transparent' }}
+                        originWhitelist={["*"]}
+                        scrollEnabled={false}
+                        showsVerticalScrollIndicator={false}
+                        showsHorizontalScrollIndicator={false}
+                      />
+                    ) : null}
+                  </View>
+                )}
+                <View style={{ flex:1, paddingRight:4 }}>
                   <Text style={{ color:'white', fontSize:16, fontWeight:'700', letterSpacing:0.4 }} numberOfLines={1}>
                     {certificate.title}
                   </Text>
@@ -68,7 +140,6 @@ export function CertificateCard({ certificate, onPress, index = 0 }: Certificate
                     {new Date(certificate.dateIssued).toLocaleDateString()}
                   </Text>
                 </View>
-                <VerifiedBadge isVerified={certificate.isVerified} />
               </View>
               {certificate.description && (
                 <Text style={{ color:'#c2d5df', fontSize:12, lineHeight:18, opacity:0.88 }} numberOfLines={3}>
